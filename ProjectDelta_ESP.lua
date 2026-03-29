@@ -30,6 +30,7 @@ local CFG_DEFAULTS = {
     aimOn        = true,
     npcEsp       = true,
     bodyEsp      = true,
+    mapOn        = true,
     listOpacity  = 0.85,
     rightOpacity = 0.85,
     lx = 10,  ly = 340,
@@ -363,8 +364,9 @@ UI.AddTab("Project Delta", function(tab)
     -- Izquierda: ESP del mundo
     local worldSec = tab:Section("ESP del mundo", "Left")
 
-    worldSec:Toggle("npcEsp",  "ESP de NPCs",      CFG.npcEsp,  function(state) CFG.npcEsp=state  end)
-    worldSec:Toggle("bodyEsp", "ESP de cadáveres", CFG.bodyEsp, function(state) CFG.bodyEsp=state end)
+    worldSec:Toggle("npcEsp",  "NPC ESP",       CFG.npcEsp,  function(state) CFG.npcEsp=state  end)
+    worldSec:Toggle("bodyEsp", "Dead Body ESP",  CFG.bodyEsp, function(state) CFG.bodyEsp=state end)
+    worldSec:Toggle("mapOn",   "Map ESP",        CFG.mapOn,   function(state) CFG.mapOn=state   end)
 
     -- Derecha: Opacidad
     local opSec = tab:Section("Opacidad", "Right")
@@ -401,12 +403,13 @@ UI.AddTab("Project Delta", function(tab)
     -- Importar: el usuario pega el string exportado aquí y presiona Enter
     local importField = saveSec:InputText("cfgImport", "Pegar config aquí", "", function(text)
         if importCFG(text) then
-            -- aplica todos los valores cargados
+            -- apply all loaded values
             UI.SetValue("invEsp",       CFG.invEsp)
             UI.SetValue("showList",     CFG.showList)
             UI.SetValue("aimOn",        CFG.aimOn)
             UI.SetValue("npcEsp",       CFG.npcEsp)
             UI.SetValue("bodyEsp",      CFG.bodyEsp)
+            UI.SetValue("mapOn",        CFG.mapOn)
             UI.SetValue("listOpacity",  CFG.listOpacity)
             UI.SetValue("rightOpacity", CFG.rightOpacity)
             -- aplica opacidad a los paneles Drawing
@@ -437,6 +440,7 @@ UI.AddTab("Project Delta", function(tab)
         UI.SetValue("aimOn",        CFG.aimOn)
         UI.SetValue("npcEsp",       CFG.npcEsp)
         UI.SetValue("bodyEsp",      CFG.bodyEsp)
+        UI.SetValue("mapOn",        CFG.mapOn)
         UI.SetValue("listOpacity",  CFG.listOpacity)
         UI.SetValue("rightOpacity", CFG.rightOpacity)
         INV.lx=CFG.lx; INV.ly=CFG.ly; INV.rx=CFG.rx; INV.ry=CFG.ry
@@ -656,9 +660,132 @@ RunService.RenderStepped:Connect(function()
     if n~=INV.lastN then INV.lastN=n; buildList() end
 end)
 
--- ─── Inicialización ─────────────────────────────────────────────────────────────
+-- ─── Map ESP ─────────────────────────────────────────────────────────────────
+-- Original logic from MapESP v12.3, toggled via CFG.mapOn instead of keypress.
+-- K_MAP (M) still shows the map; if CFG.mapOn is off the map never renders.
+local MAP_K_MAP   = 77  -- M
+local MAP_C_ENEMY = Color3.fromRGB(220,  50,  50)
+local MAP_C_SELF  = Color3.fromRGB(255, 220,   0)
+
+local MAP_SCALE_X  =  0.133647
+local MAP_SCALE_Y  =  0.133905
+local MAP_ORIGIN_X =  933.08
+local MAP_ORIGIN_Y =  556.44
+
+local function mapFindWait(parent, name)
+    local o = parent:FindFirstChild(name)
+    while not o do task.wait(0.1); o = parent:FindFirstChild(name) end
+    return o
+end
+
+local mapGui       = LocalPlayer.PlayerGui
+local mapMainFrame = mapFindWait(
+    mapFindWait(mapFindWait(mapGui, "MainGui").MainFrame, "MapFrame"), "MainFrame"
+)
+
+local function worldToMap(wx, wz)
+    return MAP_ORIGIN_X + wx * MAP_SCALE_X,
+           MAP_ORIGIN_Y + wz * MAP_SCALE_Y
+end
+
+local mapDots = {}
+
+local function mapNewDot(col)
+    local o = Drawing.new("Circle")
+    o.Radius=5; o.Filled=true; o.Color=col
+    o.Transparency=1; o.NumSides=12; o.Visible=false
+    return o
+end
+local function mapNewLabel(col)
+    local o = Drawing.new("Text")
+    o.Color=col; o.Size=10; o.Outline=true
+    o.Center=true; o.Font=Drawing.Fonts.SystemBold; o.Visible=false
+    return o
+end
+local function mapGetOrCreate(name, col)
+    if not mapDots[name] then
+        mapDots[name] = {dot=mapNewDot(col), label=mapNewLabel(col)}
+    end
+    return mapDots[name]
+end
+local function mapRemoveDot(name)
+    if mapDots[name] then
+        mapDots[name].dot:Remove(); mapDots[name].label:Remove(); mapDots[name]=nil
+    end
+end
+local function mapHideAll()
+    for _,s in pairs(mapDots) do s.dot.Visible=false; s.label.Visible=false end
+end
+
+local function mapGetRootPart(p)
+    if not p.Character then return nil end
+    return p.Character:FindFirstChild("HumanoidRootPart")
+        or p.Character:FindFirstChild("UpperTorso")
+        or p.Character:FindFirstChild("Head")
+        or p.Character:FindFirstChildOfClass("BasePart")
+end
+
+local mapLastPos = {}
+
+spawn(function()
+    local wasOpen = false
+    while true do
+        local keyDown = iskeypressed(MAP_K_MAP)
+        local open    = keyDown and CFG.mapOn   -- respects the UI toggle
+
+        if not open then
+            if wasOpen then mapHideAll() end
+        else
+            local current = {}
+            for _,p in ipairs(Players:GetPlayers()) do current[p.Name]=p end
+
+            for name in pairs(mapDots) do
+                if not current[name] then
+                    mapRemoveDot(name); mapLastPos[name]=nil
+                end
+            end
+
+            for name,p in pairs(current) do
+                local isSelf = (name == LocalPlayer.Name)
+                local col    = isSelf and MAP_C_SELF or MAP_C_ENEMY
+
+                local root
+                if isSelf then
+                    local char = LocalPlayer.Character
+                    root = char and char:FindFirstChild("HumanoidRootPart")
+                else
+                    root = mapGetRootPart(p)
+                end
+
+                local wx, wz
+                if root then
+                    wx,wz = root.Position.X, root.Position.Z
+                    mapLastPos[name] = {x=wx, z=wz}
+                elseif mapLastPos[name] then
+                    wx,wz = mapLastPos[name].x, mapLastPos[name].z
+                end
+
+                if wx then
+                    local px,py = worldToMap(wx,wz)
+                    local s = mapGetOrCreate(name,col)
+                    s.dot.Color   = col; s.label.Color = col
+                    s.dot.Position   = Vector2.new(px,py);      s.dot.Visible   = true
+                    s.label.Text     = isSelf and "[ you ]" or name
+                    s.label.Position = Vector2.new(px,py-12);   s.label.Visible = true
+                elseif mapDots[name] then
+                    mapDots[name].dot.Visible=false; mapDots[name].label.Visible=false
+                end
+            end
+        end
+
+        wasOpen = open
+        task.wait(open and 0.1 or 0.2)
+    end
+end)
+
+-- ─── Init ─────────────────────────────────────────────────────────────────────
 INV.rx = Camera.ViewportSize.X - RP.w - 10
 applyListPos(INV.lx, INV.ly)
 applyRightOpacity()
 if CFG.invEsp then buildList() end
-notify("Project Delta  -  abre el menú Matcha para configurar", "PD v4.0", 4)
+notify("Project Delta  -  open Matcha menu to configure", "PD v4.0", 4)
