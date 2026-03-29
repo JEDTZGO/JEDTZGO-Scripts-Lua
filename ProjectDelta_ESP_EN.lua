@@ -4,12 +4,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer       = Players.LocalPlayer
 local Camera            = workspace.CurrentCamera
 
--- ─── ESP colours (world-space labels) ───────────────────────────────────────
+-- ─── ESP Colors (world labels) ────────────────────────────────────────────────
 local C_NPC        = Color3.fromRGB(255, 180,   0)
 local C_CORPSE     = Color3.fromRGB(180, 180, 180)
 local C_CORPSE_NPC = Color3.fromRGB(120, 120, 120)
 
--- ─── Item filter ─────────────────────────────────────────────────────────────
+-- ─── Item filter ──────────────────────────────────────────────────────────────
 local FILTER = {
     Equipment=true, Keychain=true, Map=true, DAGR=true,
     Lighter=true, Radio=true, Pathfinder=true, ['"Pathfinder"']=true,
@@ -20,7 +20,7 @@ local FILTER = {
     ["W. Shirt"]=true, ["W. Pants"]=true,
 }
 
--- ─── Config defaults ─────────────────────────────────────────────────────────
+-- ─── Default configuration values ─────────────────────────────────────────────
 -- CFG is the single source of truth for all settings.
 -- It is loaded from disk on startup, updated by Matcha callbacks,
 -- and saved to disk whenever the user changes something.
@@ -30,6 +30,7 @@ local CFG_DEFAULTS = {
     aimOn        = true,
     npcEsp       = true,
     bodyEsp      = true,
+    mapOn        = true,
     listOpacity  = 0.85,
     rightOpacity = 0.85,
     lx = 10,  ly = 340,
@@ -40,7 +41,7 @@ local CFG = {}
 for k,v in pairs(CFG_DEFAULTS) do CFG[k]=v end
 
 -- ─── Serialization (pure Lua, no executor APIs) ───────────────────────────────
--- Format: "PD|key:value|key:value|..."  — compact, pasteable as a single line.
+-- Format: "PD|key:value|key:value|..." — compact, fits on a single line.
 local function exportCFG()
     local parts = {"PD"}
     for k,v in pairs(CFG) do
@@ -48,7 +49,7 @@ local function exportCFG()
         if t=="boolean" then
             parts[#parts+1] = k..":"..(v and "1" or "0")
         elseif t=="number" then
-            -- round to 4 decimal places to keep string short
+            -- round to 4 significant digits to keep the string short
             parts[#parts+1] = k..":"..string.format("%.4g", v)
         end
     end
@@ -74,12 +75,12 @@ local function importCFG(raw)
     return true
 end
 
--- Tries setclipboard (available in most executors). Silently skips if missing.
+-- Attempts setclipboard (available in most executors). Silently ignores if unavailable.
 local function copyToClipboard(str)
     pcall(setclipboard, str)
 end
 
--- ─── Runtime state ───────────────────────────────────────────────────────────
+-- ─── Runtime state ────────────────────────────────────────────────────────────
 local INV = {
     cursor=1, selected=nil, players={}, lastN=0, dirty=false,
     lx=CFG.lx, ly=CFG.ly, rx=CFG.rx, ry=CFG.ry,
@@ -89,7 +90,7 @@ local MAX_I       = 15
 local lastAimName = nil
 local THRESHOLD2  = 350 * 350
 
--- ─── Drawing helpers ─────────────────────────────────────────────────────────
+-- ─── Drawing utilities ────────────────────────────────────────────────────────
 local DH         = 14
 local PAD        = 8
 local BASE_W     = 185
@@ -141,7 +142,7 @@ local function mkLn(x1,y1,x2,y2,col,tr,zi)
     o.ZIndex=zi; o.Visible=false; return o
 end
 
--- ─── Player list Drawing panel ───────────────────────────────────────────────
+-- ─── Player list panel (Drawing) ──────────────────────────────────────────────
 local lDrag    = mkSq (0,0,LP.w,DH, C_DRAG,  7,1,3)
 local lDOut    = mkSqO(0,0,LP.w,DH, C_BORDER,7,  3)
 local lDLbl    = mkTx (0,0,":: players", C_ACCENT,11,8)
@@ -153,7 +154,7 @@ local lResizeB = mkLn (0,0,0,0, C_ACCENT, 0.3,10)
 local pRows = {}
 for i=1,MAX_P do pRows[i]=mkTx(0,0,"",C_DIM,12,10) end
 
--- Uses CFG directly — safe to call at any time, even before UI.AddTab runs
+-- Uses CFG directly — safe to call at any point, even before UI.AddTab
 local function applyListOpacity()
     local tr = 1 - CFG.listOpacity
     lBg.Transparency=tr; lDrag.Transparency=tr
@@ -205,7 +206,7 @@ local function buildList()
     updateListResize(); INV.dirty=false
 end
 
--- ─── Right (inventory) Drawing panel ─────────────────────────────────────────
+-- ─── Right panel (inventory, Drawing) ────────────────────────────────────────
 local rBg      = mkSq (0,0,RP.w,20, C_BG,    8,1,3)
 local rOut     = mkSqO(0,0,RP.w,20, C_BORDER,8,  3)
 local rDrag    = mkSq (0,0,RP.w,DH, C_DRAG,  9,1,3)
@@ -310,7 +311,7 @@ local function openCursor()
     end
 end
 
--- ─── World-space ESP labels ───────────────────────────────────────────────────
+-- ─── World ESP labels ─────────────────────────────────────────────────────────
 local espSlots={}
 local function espLabel(col)
     local t=Drawing.new("Text"); t.Color=col; t.Size=13; t.Outline=true
@@ -335,9 +336,8 @@ local function espRemove(m)
     end
 end
 
--- ─── Matcha menu tab ─────────────────────────────────────────────────────────
--- All callbacks update CFG first, then saveConfig(), keeping CFG and
--- Matcha's internal widget state always in sync.
+-- ─── Matcha menu tab ──────────────────────────────────────────────────────────
+
 UI.AddTab("Project Delta", function(tab)
 
     -- Left: Inv ESP
@@ -349,14 +349,14 @@ UI.AddTab("Project Delta", function(tab)
         else hideList(); hideRight(); INV.selected=nil end
     end)
 
-    invSec:Toggle("showList", "Player List", CFG.showList, function(state)
+    invSec:Toggle("showList", "Player list", CFG.showList, function(state)
         CFG.showList=state
         if CFG.invEsp then
             if state then buildList() else hideList(); hideInv() end
         end
     end)
 
-    invSec:Toggle("aimOn", "Aim Panel", CFG.aimOn, function(state)
+    invSec:Toggle("aimOn", "Aim panel", CFG.aimOn, function(state)
         CFG.aimOn=state
         if not state and not INV.selected then hideRight() end
     end)
@@ -364,18 +364,19 @@ UI.AddTab("Project Delta", function(tab)
     -- Left: World ESP
     local worldSec = tab:Section("World ESP", "Left")
 
-    worldSec:Toggle("npcEsp",  "NPC ESP",      CFG.npcEsp,  function(state) CFG.npcEsp=state  end)
-    worldSec:Toggle("bodyEsp", "Dead Body ESP", CFG.bodyEsp, function(state) CFG.bodyEsp=state end)
+    worldSec:Toggle("npcEsp",  "NPC ESP",       CFG.npcEsp,  function(state) CFG.npcEsp=state  end)
+    worldSec:Toggle("bodyEsp", "Dead Body ESP",  CFG.bodyEsp, function(state) CFG.bodyEsp=state end)
+    worldSec:Toggle("mapOn",   "Map ESP",        CFG.mapOn,   function(state) CFG.mapOn=state   end)
 
     -- Right: Opacity
     local opSec = tab:Section("Opacity", "Right")
 
-    opSec:SliderFloat("listOpacity", "List Panel", 0.0, 1.0, CFG.listOpacity, "%.2f", function(val)
+    opSec:SliderFloat("listOpacity", "List panel", 0.0, 1.0, CFG.listOpacity, "%.2f", function(val)
         CFG.listOpacity=val
         lBg.Transparency=1-val; lDrag.Transparency=1-val
     end)
 
-    opSec:SliderFloat("rightOpacity", "Inv / Aim Panel", 0.0, 1.0, CFG.rightOpacity, "%.2f", function(val)
+    opSec:SliderFloat("rightOpacity", "Inv / Aim panel", 0.0, 1.0, CFG.rightOpacity, "%.2f", function(val)
         CFG.rightOpacity=val
         rBg.Transparency=1-val; rDrag.Transparency=1-val
     end)
@@ -383,11 +384,11 @@ UI.AddTab("Project Delta", function(tab)
     -- Right: Save / Load config
     local saveSec = tab:Section("Config", "Right")
 
-    saveSec:Text("Export copies your config to clipboard.")
-    saveSec:Text("Paste it in the Import field to restore it.")
+    saveSec:Text("Export copies your config to the clipboard.")
+    saveSec:Text("Paste it into the Import field to restore it.")
     saveSec:Spacing()
 
-    -- Export: encodes current CFG + panel positions and copies to clipboard
+    -- Export: encodes the current CFG + panel positions and copies to clipboard
     saveSec:Button("Export config  (copy to clipboard)", function()
         -- sync panel positions into CFG before exporting
         CFG.lx=INV.lx; CFG.ly=INV.ly
@@ -408,6 +409,7 @@ UI.AddTab("Project Delta", function(tab)
             UI.SetValue("aimOn",        CFG.aimOn)
             UI.SetValue("npcEsp",       CFG.npcEsp)
             UI.SetValue("bodyEsp",      CFG.bodyEsp)
+            UI.SetValue("mapOn",        CFG.mapOn)
             UI.SetValue("listOpacity",  CFG.listOpacity)
             UI.SetValue("rightOpacity", CFG.rightOpacity)
             -- apply opacity to Drawing panels
@@ -431,13 +433,14 @@ UI.AddTab("Project Delta", function(tab)
     -- Right: Reset
     local miscSec = tab:Section("Misc", "Right")
 
-    miscSec:Button("Reset Defaults", function()
+    miscSec:Button("Reset to default values", function()
         for k,v in pairs(CFG_DEFAULTS) do CFG[k]=v end
         UI.SetValue("invEsp",       CFG.invEsp)
         UI.SetValue("showList",     CFG.showList)
         UI.SetValue("aimOn",        CFG.aimOn)
         UI.SetValue("npcEsp",       CFG.npcEsp)
         UI.SetValue("bodyEsp",      CFG.bodyEsp)
+        UI.SetValue("mapOn",        CFG.mapOn)
         UI.SetValue("listOpacity",  CFG.listOpacity)
         UI.SetValue("rightOpacity", CFG.rightOpacity)
         INV.lx=CFG.lx; INV.ly=CFG.ly; INV.rx=CFG.rx; INV.ry=CFG.ry
@@ -448,7 +451,7 @@ UI.AddTab("Project Delta", function(tab)
     end)
 end)
 
--- ─── List panel drag + keyboard navigation ───────────────────────────────────
+-- ─── List panel drag + keyboard navigation ────────────────────────────────────
 local Mouse = LocalPlayer:GetMouse()
 local K_UP=38; local K_DOWN=40; local K_ENTER=13; local K_BKSP=8
 
@@ -521,7 +524,7 @@ spawn(function()
         end
         prevM1=m1
 
-        -- keyboard nav in player list
+        -- keyboard navigation in the list
         local up  = iskeypressed(K_UP)
         local dwn = iskeypressed(K_DOWN)
         local ent = iskeypressed(K_ENTER)
@@ -536,7 +539,7 @@ spawn(function()
         end
         wUp=up; wDwn=dwn; wEnt=ent; wDel=del
 
-        -- world-space ESP rendering
+        -- world ESP label rendering
         local lc=LocalPlayer.Character
         local lr=lc and lc:FindFirstChild("HumanoidRootPart")
         for model,slot in pairs(espSlots) do
@@ -571,7 +574,7 @@ spawn(function()
     end
 end)
 
--- ─── Aim panel: auto-track closest player to crosshair ───────────────────────
+-- ─── Aim panel: tracks the player closest to the crosshair ───────────────────
 lastAimName=nil
 spawn(function()
     while true do
@@ -607,7 +610,7 @@ spawn(function()
     end
 end)
 
--- ─── NPC / dead body ESP scanner ─────────────────────────────────────────────
+-- ─── NPC & corpse ESP scanner ─────────────────────────────────────────────────
 spawn(function()
     while true do
         task.wait(0.5)
@@ -650,14 +653,137 @@ spawn(function()
     end
 end)
 
--- ─── Player count watcher ────────────────────────────────────────────────────
+-- ─── Player count watcher ─────────────────────────────────────────────────────
 RunService.RenderStepped:Connect(function()
     if not CFG.invEsp then return end
     local n=#Players:GetPlayers()
     if n~=INV.lastN then INV.lastN=n; buildList() end
 end)
 
--- ─── Init ────────────────────────────────────────────────────────────────────
+-- ─── Map ESP ──────────────────────────────────────────────────────────────────
+-- Original logic from MapESP v12.3, toggled via CFG.mapOn instead of keypress.
+-- K_MAP (M) still shows the map; if CFG.mapOn is off the map never renders.
+local MAP_K_MAP   = 77  -- M
+local MAP_C_ENEMY = Color3.fromRGB(220,  50,  50)
+local MAP_C_SELF  = Color3.fromRGB(255, 220,   0)
+
+local MAP_SCALE_X  =  0.133647
+local MAP_SCALE_Y  =  0.133905
+local MAP_ORIGIN_X =  933.08
+local MAP_ORIGIN_Y =  556.44
+
+local function mapFindWait(parent, name)
+    local o = parent:FindFirstChild(name)
+    while not o do task.wait(0.1); o = parent:FindFirstChild(name) end
+    return o
+end
+
+local mapGui       = LocalPlayer.PlayerGui
+local mapMainFrame = mapFindWait(
+    mapFindWait(mapFindWait(mapGui, "MainGui").MainFrame, "MapFrame"), "MainFrame"
+)
+
+local function worldToMap(wx, wz)
+    return MAP_ORIGIN_X + wx * MAP_SCALE_X,
+           MAP_ORIGIN_Y + wz * MAP_SCALE_Y
+end
+
+local mapDots = {}
+
+local function mapNewDot(col)
+    local o = Drawing.new("Circle")
+    o.Radius=5; o.Filled=true; o.Color=col
+    o.Transparency=1; o.NumSides=12; o.Visible=false
+    return o
+end
+local function mapNewLabel(col)
+    local o = Drawing.new("Text")
+    o.Color=col; o.Size=10; o.Outline=true
+    o.Center=true; o.Font=Drawing.Fonts.SystemBold; o.Visible=false
+    return o
+end
+local function mapGetOrCreate(name, col)
+    if not mapDots[name] then
+        mapDots[name] = {dot=mapNewDot(col), label=mapNewLabel(col)}
+    end
+    return mapDots[name]
+end
+local function mapRemoveDot(name)
+    if mapDots[name] then
+        mapDots[name].dot:Remove(); mapDots[name].label:Remove(); mapDots[name]=nil
+    end
+end
+local function mapHideAll()
+    for _,s in pairs(mapDots) do s.dot.Visible=false; s.label.Visible=false end
+end
+
+local function mapGetRootPart(p)
+    if not p.Character then return nil end
+    return p.Character:FindFirstChild("HumanoidRootPart")
+        or p.Character:FindFirstChild("UpperTorso")
+        or p.Character:FindFirstChild("Head")
+        or p.Character:FindFirstChildOfClass("BasePart")
+end
+
+local mapLastPos = {}
+
+spawn(function()
+    local wasOpen = false
+    while true do
+        local keyDown = iskeypressed(MAP_K_MAP)
+        local open    = keyDown and CFG.mapOn   -- respects the UI toggle
+
+        if not open then
+            if wasOpen then mapHideAll() end
+        else
+            local current = {}
+            for _,p in ipairs(Players:GetPlayers()) do current[p.Name]=p end
+
+            for name in pairs(mapDots) do
+                if not current[name] then
+                    mapRemoveDot(name); mapLastPos[name]=nil
+                end
+            end
+
+            for name,p in pairs(current) do
+                local isSelf = (name == LocalPlayer.Name)
+                local col    = isSelf and MAP_C_SELF or MAP_C_ENEMY
+
+                local root
+                if isSelf then
+                    local char = LocalPlayer.Character
+                    root = char and char:FindFirstChild("HumanoidRootPart")
+                else
+                    root = mapGetRootPart(p)
+                end
+
+                local wx, wz
+                if root then
+                    wx,wz = root.Position.X, root.Position.Z
+                    mapLastPos[name] = {x=wx, z=wz}
+                elseif mapLastPos[name] then
+                    wx,wz = mapLastPos[name].x, mapLastPos[name].z
+                end
+
+                if wx then
+                    local px,py = worldToMap(wx,wz)
+                    local s = mapGetOrCreate(name,col)
+                    s.dot.Color   = col; s.label.Color = col
+                    s.dot.Position   = Vector2.new(px,py);      s.dot.Visible   = true
+                    s.label.Text     = isSelf and "[ you ]" or name
+                    s.label.Position = Vector2.new(px,py-12);   s.label.Visible = true
+                elseif mapDots[name] then
+                    mapDots[name].dot.Visible=false; mapDots[name].label.Visible=false
+                end
+            end
+        end
+
+        wasOpen = open
+        task.wait(open and 0.1 or 0.2)
+    end
+end)
+
+-- ─── Init ─────────────────────────────────────────────────────────────────────
 INV.rx = Camera.ViewportSize.X - RP.w - 10
 applyListPos(INV.lx, INV.ly)
 applyRightOpacity()
