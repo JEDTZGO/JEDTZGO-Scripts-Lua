@@ -19,6 +19,14 @@ local ScriptSettings = {
     }
 }
 
+local FieldOfViewRing = Drawing.new("Circle")
+FieldOfViewRing.Radius = ScriptSettings.Aimbot.FieldOfView
+FieldOfViewRing.Color = ScriptSettings.Visuals.FOVColor
+FieldOfViewRing.Thickness = 1
+FieldOfViewRing.NumSides = 64
+FieldOfViewRing.Filled = false
+FieldOfViewRing.Visible = ScriptSettings.Aimbot.Enabled and ScriptSettings.Visuals.DrawFOV
+
 -- ── MATCHA UI ────────────────────────────────────────────────────────────────
 UI.AddTab("Script", function(tab)
 
@@ -27,8 +35,9 @@ UI.AddTab("Script", function(tab)
         ScriptSettings.Aimbot.Enabled = v
         FieldOfViewRing.Visible = v and ScriptSettings.Visuals.DrawFOV
     end)
-    aim:Combo("aim_hitbox", "Hitbox", {"root", "head", "torso"}, 0, function(_, text)
-        ScriptSettings.Aimbot.TargetHitbox = text
+    aim:SliderInt("aim_fov", "FOV", 10, 800, ScriptSettings.Aimbot.FieldOfView, function(v)
+        ScriptSettings.Aimbot.FieldOfView = v
+        FieldOfViewRing.Radius = v
     end)
     aim:SliderFloat("aim_smooth", "Smoothing", 0.1, 20.0, ScriptSettings.Aimbot.SmoothingAmount, "%.1f", function(v)
         ScriptSettings.Aimbot.SmoothingAmount = v
@@ -51,17 +60,19 @@ UI.AddTab("Script", function(tab)
     local misc = tab:Section("Misc", "Right")
     misc:Button("Reset", function()
         UI.SetValue("aim_on", true)
+        UI.SetValue("aim_fov", 150)
         UI.SetValue("aim_smooth", 5.0)
         UI.SetValue("fov_draw", true)
         UI.SetValue("box_on", true)
         ScriptSettings.Aimbot.Enabled = true
+        ScriptSettings.Aimbot.FieldOfView = 150
         ScriptSettings.Aimbot.SmoothingAmount = 5
         ScriptSettings.Visuals.DrawFOV = true
+        FieldOfViewRing.Radius = 150
         FieldOfViewRing.Visible = true
     end)
 end)
 
--- ── LOGICA PRINCIPAL (sin cambios) ───────────────────────────────────────────
 local function IsTeammateFromHitbox(hitbox)
     if not hitbox or not hitbox.Parent then return false end
     local model = hitbox.Parent
@@ -69,14 +80,6 @@ local function IsTeammateFromHitbox(hitbox)
     if not torso then return false end
     return torso:FindFirstChild("tag") ~= nil
 end
-
-local FieldOfViewRing = Drawing.new("Circle")
-FieldOfViewRing.Radius = ScriptSettings.Aimbot.FieldOfView
-FieldOfViewRing.Color = ScriptSettings.Visuals.FOVColor
-FieldOfViewRing.Thickness = 1
-FieldOfViewRing.NumSides = 64
-FieldOfViewRing.Filled = false
-FieldOfViewRing.Visible = ScriptSettings.Aimbot.Enabled and ScriptSettings.Visuals.DrawFOV
 
 local function PerformMouseMovement(targetScreenPosition, smoothingValue)
     local differenceX = (targetScreenPosition.X - mouse.X) / smoothingValue
