@@ -1,0 +1,152 @@
+local Players = game:GetService("Players")
+local WorkspaceService = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+local mouse = LocalPlayer:GetMouse()
+local CurrentCamera = WorkspaceService.CurrentCamera
+
+local ScriptSettings = {
+    Aimbot = {
+        Enabled = true,
+        TargetHitbox = "root",
+        FieldOfView = 150,
+        SmoothingAmount = 5
+    },
+    Visuals = {
+        DrawFOV = true,
+        FOVColor = Color3.fromRGB(255, 255, 255),
+        EnemyBoxColor = Color3.fromRGB(255, 0, 0)
+    }
+}
+
+local function IsTeammate(model)
+    local torso = model:FindFirstChild("torso")
+    if not torso then return false end
+    return torso:FindFirstChild("tag") ~= nil
+end
+
+local FieldOfViewRing = Drawing.new("Circle")
+FieldOfViewRing.Radius = ScriptSettings.Aimbot.FieldOfView
+FieldOfViewRing.Color = ScriptSettings.Visuals.FOVColor
+FieldOfViewRing.Thickness = 1
+FieldOfViewRing.NumSides = 64
+FieldOfViewRing.Filled = false
+FieldOfViewRing.Visible = ScriptSettings.Aimbot.Enabled and ScriptSettings.Visuals.DrawFOV
+
+local function PerformMouseMovement(targetScreenPosition, smoothingValue)
+    local differenceX = (targetScreenPosition.X - mouse.X) / smoothingValue
+    local differenceY = (targetScreenPosition.Y - mouse.Y) / smoothingValue
+    mousemoverel(differenceX, differenceY)
+end
+
+local drawingObjectPool = {}
+local cachedEnemyParts = {}
+
+
+task.spawn(function()
+    while true do
+        local newCache = {}
+        local workspaceEntities = WorkspaceService:GetChildren()
+
+        for _, folderContainer in pairs(workspaceEntities) do
+            if folderContainer.Name == "Folder" then
+                for _, entityModel in pairs(folderContainer:GetChildren()) do
+                    if entityModel.Name == "Model" and entityModel.ClassName == "Model" then
+                        if not IsTeammate(entityModel) then
+                            local hitboxPart = entityModel:FindFirstChild(ScriptSettings.Aimbot.TargetHitbox)
+                            if hitboxPart then
+                                table.insert(newCache, hitboxPart)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        cachedEnemyParts = newCache
+        task.wait(10)
+    end
+end)
+
+
+while true do
+    task.wait()
+
+    if FieldOfViewRing.Visible then
+        FieldOfViewRing.Position = Vector2.new(mouse.X, mouse.Y)
+    end
+
+    local enemiesOnScreen = {}
+    local activeDrawingCount = 1
+
+    for index = #cachedEnemyParts, 1, -1 do
+        local enemyHitbox = cachedEnemyParts[index]
+
+        if enemyHitbox and enemyHitbox.Parent and enemyHitbox:IsDescendantOf(WorkspaceService) then
+            local hitboxWorldPosition = enemyHitbox.Position
+
+            local headScreenPos, headIsVisible = WorldToScreen(Vector3.new(hitboxWorldPosition.X, hitboxWorldPosition.Y + 3.5, hitboxWorldPosition.Z))
+            local feetScreenPos, feetIsVisible = WorldToScreen(Vector3.new(hitboxWorldPosition.X, hitboxWorldPosition.Y - 3.5, hitboxWorldPosition.Z))
+
+            if headScreenPos and feetScreenPos and headIsVisible then
+                local calculatedBoxHeight = feetScreenPos.Y - headScreenPos.Y
+
+                if calculatedBoxHeight > 2 then
+                    local rootScreenPos, rootIsVisible = WorldToScreen(hitboxWorldPosition)
+
+                    if rootScreenPos and rootIsVisible then
+                        table.insert(enemiesOnScreen, {
+                            ScreenPosition = rootScreenPos
+                        })
+
+                        local espBox = drawingObjectPool[activeDrawingCount]
+                        if not espBox then
+                            espBox = Drawing.new("Square")
+                            espBox.Color = ScriptSettings.Visuals.EnemyBoxColor
+                            espBox.Filled = false
+                            espBox.Thickness = 1
+                            drawingObjectPool[activeDrawingCount] = espBox
+                        end
+
+                        local calculatedBoxWidth = calculatedBoxHeight / 1.5
+                        espBox.Position = Vector2.new(headScreenPos.X - (calculatedBoxWidth / 2), headScreenPos.Y)
+                        espBox.Size = Vector2.new(calculatedBoxWidth, calculatedBoxHeight)
+                        espBox.Visible = true
+
+                        activeDrawingCount = activeDrawingCount + 1
+                    end
+                end
+            end
+        else
+            table.remove(cachedEnemyParts, index)
+        end
+    end
+
+    for poolIndex = activeDrawingCount, #drawingObjectPool do
+        if drawingObjectPool[poolIndex] then
+            drawingObjectPool[poolIndex].Visible = false
+        end
+    end
+
+    if ScriptSettings.Aimbot.Enabled and #enemiesOnScreen > 0 then
+        local bestTarget = nil
+        local minimumDistance = ScriptSettings.Aimbot.FieldOfView
+        local mX = mouse.X
+        local mY = mouse.Y
+
+        for _, targetData in pairs(enemiesOnScreen) do
+            local differenceX = targetData.ScreenPosition.X - mX
+            local differenceY = targetData.ScreenPosition.Y - mY
+            local distanceToMouse = math.sqrt(differenceX * differenceX + differenceY * differenceY)
+
+            if distanceToMouse < minimumDistance then
+                minimumDistance = distanceToMouse
+                bestTarget = targetData
+            end
+        end
+
+        if bestTarget and ismouse2pressed() then
+            PerformMouseMovement(bestTarget.ScreenPosition, ScriptSettings.Aimbot.SmoothingAmount)
+        end
+    end
+end
