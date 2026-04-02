@@ -1,5 +1,4 @@
 local Players           = game:GetService("Players")
-local RunService        = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer       = Players.LocalPlayer
 
@@ -7,7 +6,7 @@ local C_ACCENT=Color3.fromRGB(195,66,148); local C_TEXT=Color3.fromRGB(240,240,2
 local C_DIM=Color3.fromRGB(120,115,135);   local C_BG=Color3.fromRGB(28,26,34)
 local C_DRAG=Color3.fromRGB(18,17,22);     local C_BORDER=Color3.fromRGB(55,50,65)
 local C_NPC=Color3.fromRGB(255,180,0);     local C_CORPSE=Color3.fromRGB(180,180,180)
-local C_CORPSE_NPC=Color3.fromRGB(120,120,120)
+local C_CORPSE_NPC=Color3.fromRGB(120,120,120); local C_PLAYER=Color3.fromRGB(100,210,255)
 local MAP_C_ENEMY=Color3.fromRGB(220,50,50); local MAP_C_SELF=Color3.fromRGB(255,220,0)
 
 local FILTER={
@@ -19,7 +18,7 @@ local FILTER={
 }
 
 local CFG_DEFAULTS={
-    invEsp=true,showList=true,aimOn=true,npcEsp=true,bodyEsp=true,mapOn=true,
+    invEsp=true,showList=true,aimOn=true,playerEsp=true,npcEsp=true,bodyEsp=true,mapOn=true,
     listOpacity=0.85,rightOpacity=0.85,lx=10,ly=340,rx=0,ry=44,
 }
 local CFG={}; for k,v in pairs(CFG_DEFAULTS) do CFG[k]=v end
@@ -49,11 +48,6 @@ local function importCFG(raw)
 end
 local function copyToClipboard(str) pcall(setclipboard,str) end
 
-local function findWait(parent,name,timeout)
-    timeout=timeout or 20; local t=0; local o=parent:FindFirstChild(name)
-    while not o and t<timeout do task.wait(0.2); t=t+0.2; o=parent:FindFirstChild(name) end
-    return o
-end
 local function waitForUI(timeout)
     local t=0
     while t<timeout do
@@ -352,6 +346,7 @@ task.spawn(function()
             CFG.aimOn=state; if not state and not INV.selected then hideRight() end
         end)
         local worldSec=tab:Section("ESP del mundo","Left")
+        worldSec:Toggle("playerEsp","Player ESP",CFG.playerEsp,function(state) CFG.playerEsp=state end)
         worldSec:Toggle("npcEsp","NPC ESP",CFG.npcEsp,function(state) CFG.npcEsp=state end)
         worldSec:Toggle("bodyEsp","Dead Body ESP",CFG.bodyEsp,function(state) CFG.bodyEsp=state end)
         worldSec:Toggle("mapOn","Map ESP",CFG.mapOn,function(state)
@@ -376,7 +371,8 @@ task.spawn(function()
         saveSec:InputText("cfgImport","Pegar config aqui","",function(text)
             if importCFG(text) then
                 UI.SetValue("invEsp",CFG.invEsp); UI.SetValue("showList",CFG.showList)
-                UI.SetValue("aimOn",CFG.aimOn); UI.SetValue("npcEsp",CFG.npcEsp)
+                UI.SetValue("aimOn",CFG.aimOn); UI.SetValue("playerEsp",CFG.playerEsp)
+                UI.SetValue("npcEsp",CFG.npcEsp)
                 UI.SetValue("bodyEsp",CFG.bodyEsp); UI.SetValue("mapOn",CFG.mapOn)
                 UI.SetValue("listOpacity",CFG.listOpacity); UI.SetValue("rightOpacity",CFG.rightOpacity)
                 lBg.Transparency=1-CFG.listOpacity; lDrag.Transparency=1-CFG.listOpacity
@@ -392,7 +388,8 @@ task.spawn(function()
         miscSec:Button("Resetear a valores por defecto",function()
             for k,v in pairs(CFG_DEFAULTS) do CFG[k]=v end
             UI.SetValue("invEsp",CFG.invEsp); UI.SetValue("showList",CFG.showList)
-            UI.SetValue("aimOn",CFG.aimOn); UI.SetValue("npcEsp",CFG.npcEsp)
+            UI.SetValue("aimOn",CFG.aimOn); UI.SetValue("playerEsp",CFG.playerEsp)
+            UI.SetValue("npcEsp",CFG.npcEsp)
             UI.SetValue("bodyEsp",CFG.bodyEsp); UI.SetValue("mapOn",CFG.mapOn)
             UI.SetValue("listOpacity",CFG.listOpacity); UI.SetValue("rightOpacity",CFG.rightOpacity)
             INV.lx=CFG.lx; INV.ly=CFG.ly; INV.rx=CFG.rx; INV.ry=CFG.ry
@@ -408,7 +405,8 @@ task.spawn(function()
     applyListPos(INV.lx,INV.ly); applyRightOpacity()
     pcall(function()
         UI.SetValue("invEsp",CFG.invEsp); UI.SetValue("showList",CFG.showList)
-        UI.SetValue("aimOn",CFG.aimOn); UI.SetValue("npcEsp",CFG.npcEsp)
+        UI.SetValue("aimOn",CFG.aimOn); UI.SetValue("playerEsp",CFG.playerEsp)
+        UI.SetValue("npcEsp",CFG.npcEsp)
         UI.SetValue("bodyEsp",CFG.bodyEsp); UI.SetValue("mapOn",CFG.mapOn)
         UI.SetValue("listOpacity",CFG.listOpacity); UI.SetValue("rightOpacity",CFG.rightOpacity)
     end)
@@ -515,21 +513,23 @@ task.spawn(function()
     task.spawn(function()
         while true do
             task.wait(0.5)
-            local playerNames={}
-            for _,p in ipairs(Players:GetPlayers()) do playerNames[p.Name]=true end
             local active={}
+
             local aiZones=workspace:FindFirstChild("AiZones")
             if aiZones then
                 for _,zone in ipairs(aiZones:GetChildren()) do
                     for _,npc in ipairs(zone:GetChildren()) do
                         local h=npc:FindFirstChildOfClass("Humanoid")
-                        if h and h.Health>0 then
+                        if h and h.Health>0 and not npc:FindFirstChild("RagdollConstraints") then
                             active[npc]=true; local slot=espGet(npc,C_NPC)
                             slot.text=npc.Name; slot.col=C_NPC; slot.label.Color=C_NPC
                         end
                     end
                 end
             end
+
+            local playerNames={}
+            for _,p in ipairs(Players:GetPlayers()) do playerNames[p.Name]=true end
             local dropped=workspace:FindFirstChild("DroppedItems")
             if dropped then
                 for _,model in ipairs(dropped:GetChildren()) do
@@ -544,6 +544,7 @@ task.spawn(function()
                     end
                 end
             end
+
             for model in pairs(espSlots) do
                 if not active[model] then espRemove(model) end
             end
@@ -562,8 +563,9 @@ task.spawn(function()
                 if not root or not root.Parent then
                     slot.label.Visible=false
                 else
+                    local isPlayer=slot.col==C_PLAYER
                     local isCorpse=slot.col==C_CORPSE or slot.col==C_CORPSE_NPC
-                    local show=(isCorpse and CFG.bodyEsp) or (not isCorpse and CFG.npcEsp)
+                    local show=(isPlayer and CFG.playerEsp) or (isCorpse and CFG.bodyEsp) or (not isPlayer and not isCorpse and CFG.npcEsp)
                     if not show then
                         slot.label.Visible=false
                     else
@@ -588,11 +590,15 @@ task.spawn(function()
         end
     end)
 
-    -- ─── Conteo jugadores ─────────────────────────────────────────────────────
-    RunService.RenderStepped:Connect(function()
-        if not CFG.invEsp then return end
-        local n=#Players:GetPlayers()
-        if n~=INV.lastN then INV.lastN=n; buildList() end
+    -- ─── Loop: conteo jugadores ───────────────────────────────────────────────
+    task.spawn(function()
+        while true do
+            task.wait(0.1)
+            if CFG.invEsp then
+                local n=#Players:GetPlayers()
+                if n~=INV.lastN then INV.lastN=n; buildList() end
+            end
+        end
     end)
 
     notify("Project Delta listo  -  abre Matcha para configurar","PD v5.3",4)
