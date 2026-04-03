@@ -20,6 +20,7 @@ local FILTRO={
 local CFG_DEFECTO={
     invEsp=true,mostrarLista=true,miraOn=true,jugadorEsp=true,npcEsp=true,cuerpoEsp=true,mapaOn=true,
     opacidadLista=0.85,opacidadDerecha=0.85,lx=10,ly=340,rx=0,ry=44,
+    noRetroceso=false,
 }
 local CFG={}; for k,v in pairs(CFG_DEFECTO) do CFG[k]=v end
 
@@ -78,6 +79,66 @@ end
 local function mkLn(x1,y1,x2,y2,col,tr,zi)
     local o=Drawing.new("Line"); o.From=Vector2.new(x1,y1); o.To=Vector2.new(x2,y2)
     o.Color=col; o.Transparency=tr; o.Thickness=1; o.ZIndex=zi; o.Visible=false; return o
+end
+
+-- ─── No retroceso ─────────────────────────────────────────────────────────────
+local function encontrarOffsetValor(instancia, valorReal, tolerancia)
+    tolerancia = tolerancia or 0.0001
+    for offset = 0, 0x300, 4 do
+        local ok, comoDouble = pcall(memory_read, "double", instancia.Address + offset)
+        if ok and math.abs(comoDouble - valorReal) < tolerancia then return offset, "double" end
+        local ok2, comoFloat = pcall(memory_read, "float", instancia.Address + offset)
+        if ok2 and math.abs(comoFloat - valorReal) < tolerancia then return offset, "float" end
+    end
+    return nil, nil
+end
+
+local function detectarOffset(rutaArma)
+    local carpetas = {"RecoilPattern", "RecoilPattern2"}
+    for _, nombreCarpeta in ipairs(carpetas) do
+        local carpeta = rutaArma:FindFirstChild(nombreCarpeta)
+        if carpeta then
+            for _, hijo in ipairs(carpeta:GetChildren()) do
+                if hijo.ClassName == "BoolValue" then
+                    for _, interno in ipairs(hijo:GetChildren()) do
+                        if interno.ClassName == "NumberValue" and interno.Value ~= 0 then
+                            local offset, tipo = encontrarOffsetValor(interno, interno.Value)
+                            if offset then return offset, tipo end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return nil, nil
+end
+
+local function aplicarNoRetroceso(rutaArma)
+    local offsetDetectado, tipoDetectado = detectarOffset(rutaArma)
+    if not offsetDetectado then return end
+    local carpetas = {"RecoilPattern", "RecoilPattern2"}
+    for _, nombreCarpeta in ipairs(carpetas) do
+        local carpeta = rutaArma:FindFirstChild(nombreCarpeta)
+        if carpeta then
+            for _, hijo in ipairs(carpeta:GetChildren()) do
+                if hijo.ClassName == "BoolValue" then
+                    for _, interno in ipairs(hijo:GetChildren()) do
+                        if interno.ClassName == "NumberValue" then
+                            pcall(memory_write, tipoDetectado, interno.Address + offsetDetectado, 0)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function activarNoRetroceso()
+    local armas = ReplicatedStorage:FindFirstChild("RangedWeapons")
+    if not armas then return end
+    for _, arma in ipairs(armas:GetChildren()) do
+        pcall(aplicarNoRetroceso, arma)
+    end
 end
 
 -- ─── ESP de mapa ──────────────────────────────────────────────────────────────
@@ -345,6 +406,7 @@ task.spawn(function()
         secInv:Toggle("miraOn","Panel de mira",CFG.miraOn,function(estado)
             CFG.miraOn=estado; if not estado and not INV.seleccionado then ocultarDerecha() end
         end)
+
         local secMundo=tab:Section("ESP del mundo","Left")
         secMundo:Toggle("jugadorEsp","ESP de jugadores",CFG.jugadorEsp,function(estado) CFG.jugadorEsp=estado end)
         secMundo:Toggle("npcEsp","ESP de NPCs",CFG.npcEsp,function(estado) CFG.npcEsp=estado end)
@@ -352,6 +414,18 @@ task.spawn(function()
         secMundo:Toggle("mapaOn","ESP de mapa",CFG.mapaOn,function(estado)
             CFG.mapaOn=estado; if not estado then mapaOcultar() end
         end)
+
+        local secCombate=tab:Section("Combate","Left")
+        secCombate:Toggle("noRetroceso","No retroceso",CFG.noRetroceso,function(estado)
+            CFG.noRetroceso=estado
+            if estado then
+                pcall(activarNoRetroceso)
+                notify("No retroceso activado","Project Delta",3)
+            else
+                notify("Reinicia para desactivar el no retroceso","Project Delta",3)
+            end
+        end)
+
         local secOpac=tab:Section("Opacidad","Right")
         secOpac:SliderFloat("opacidadLista","Panel lista",0.0,1.0,CFG.opacidadLista,"%.2f",function(val)
             CFG.opacidadLista=val; lFondo.Transparency=1-val; lArrastrar.Transparency=1-val
@@ -359,6 +433,7 @@ task.spawn(function()
         secOpac:SliderFloat("opacidadDerecha","Inv / Panel mira",0.0,1.0,CFG.opacidadDerecha,"%.2f",function(val)
             CFG.opacidadDerecha=val; rFondo.Transparency=1-val; rArrastrar.Transparency=1-val
         end)
+
         local secGuardar=tab:Section("Config","Right")
         secGuardar:Text("Exportar copia tu config al portapapeles.")
         secGuardar:Text("Pegala en el campo Importar para restaurarla.")
@@ -372,25 +447,27 @@ task.spawn(function()
             if importarCFG(texto) then
                 UI.SetValue("invEsp",CFG.invEsp); UI.SetValue("mostrarLista",CFG.mostrarLista)
                 UI.SetValue("miraOn",CFG.miraOn); UI.SetValue("jugadorEsp",CFG.jugadorEsp)
-                UI.SetValue("npcEsp",CFG.npcEsp)
-                UI.SetValue("cuerpoEsp",CFG.cuerpoEsp); UI.SetValue("mapaOn",CFG.mapaOn)
+                UI.SetValue("npcEsp",CFG.npcEsp); UI.SetValue("cuerpoEsp",CFG.cuerpoEsp)
+                UI.SetValue("mapaOn",CFG.mapaOn); UI.SetValue("noRetroceso",CFG.noRetroceso)
                 UI.SetValue("opacidadLista",CFG.opacidadLista); UI.SetValue("opacidadDerecha",CFG.opacidadDerecha)
                 lFondo.Transparency=1-CFG.opacidadLista; lArrastrar.Transparency=1-CFG.opacidadLista
                 rFondo.Transparency=1-CFG.opacidadDerecha; rArrastrar.Transparency=1-CFG.opacidadDerecha
                 INV.lx=CFG.lx; INV.ly=CFG.ly; INV.rx=CFG.rx; INV.ry=CFG.ry
                 aplicarPosList(INV.lx,INV.ly)
                 if CFG.invEsp then construirLista() else ocultarLista(); ocultarDerecha(); INV.seleccionado=nil end
+                if CFG.noRetroceso then pcall(activarNoRetroceso) end
                 UI.SetValue("cfgImportar",""); notify("Config cargada!","Project Delta",3)
             else notify("String invalido.","Project Delta",3) end
         end)
         secGuardar:Spacing()
+
         local secMisc=tab:Section("Misc","Right")
         secMisc:Button("Resetear a valores por defecto",function()
             for k,v in pairs(CFG_DEFECTO) do CFG[k]=v end
             UI.SetValue("invEsp",CFG.invEsp); UI.SetValue("mostrarLista",CFG.mostrarLista)
             UI.SetValue("miraOn",CFG.miraOn); UI.SetValue("jugadorEsp",CFG.jugadorEsp)
-            UI.SetValue("npcEsp",CFG.npcEsp)
-            UI.SetValue("cuerpoEsp",CFG.cuerpoEsp); UI.SetValue("mapaOn",CFG.mapaOn)
+            UI.SetValue("npcEsp",CFG.npcEsp); UI.SetValue("cuerpoEsp",CFG.cuerpoEsp)
+            UI.SetValue("mapaOn",CFG.mapaOn); UI.SetValue("noRetroceso",CFG.noRetroceso)
             UI.SetValue("opacidadLista",CFG.opacidadLista); UI.SetValue("opacidadDerecha",CFG.opacidadDerecha)
             INV.lx=CFG.lx; INV.ly=CFG.ly; INV.rx=CFG.rx; INV.ry=CFG.ry
             lFondo.Transparency=1-CFG.opacidadLista; lArrastrar.Transparency=1-CFG.opacidadLista
@@ -406,8 +483,8 @@ task.spawn(function()
     pcall(function()
         UI.SetValue("invEsp",CFG.invEsp); UI.SetValue("mostrarLista",CFG.mostrarLista)
         UI.SetValue("miraOn",CFG.miraOn); UI.SetValue("jugadorEsp",CFG.jugadorEsp)
-        UI.SetValue("npcEsp",CFG.npcEsp)
-        UI.SetValue("cuerpoEsp",CFG.cuerpoEsp); UI.SetValue("mapaOn",CFG.mapaOn)
+        UI.SetValue("npcEsp",CFG.npcEsp); UI.SetValue("cuerpoEsp",CFG.cuerpoEsp)
+        UI.SetValue("mapaOn",CFG.mapaOn); UI.SetValue("noRetroceso",CFG.noRetroceso)
         UI.SetValue("opacidadLista",CFG.opacidadLista); UI.SetValue("opacidadDerecha",CFG.opacidadDerecha)
     end)
     if CFG.invEsp then construirLista() end
@@ -514,7 +591,6 @@ task.spawn(function()
         while true do
             task.wait(0.5)
             local activos={}
-
             local zonasIA=workspace:FindFirstChild("AiZones")
             if zonasIA then
                 for _,zona in ipairs(zonasIA:GetChildren()) do
@@ -527,7 +603,6 @@ task.spawn(function()
                     end
                 end
             end
-
             local nombresJugadores={}
             for _,p in ipairs(Players:GetPlayers()) do nombresJugadores[p.Name]=true end
             local tirados=workspace:FindFirstChild("DroppedItems")
@@ -544,7 +619,6 @@ task.spawn(function()
                     end
                 end
             end
-
             for modelo in pairs(ranuras) do
                 if not activos[modelo] then espEliminar(modelo) end
             end
@@ -590,7 +664,7 @@ task.spawn(function()
         end
     end)
 
-    -- ─── Bucle: contador de jugadores ────────────────────────────────────────
+    -- ─── Bucle: contador de jugadores ─────────────────────────────────────────
     task.spawn(function()
         while true do
             task.wait(0.1)
