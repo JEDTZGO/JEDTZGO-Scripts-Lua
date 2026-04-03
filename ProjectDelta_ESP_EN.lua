@@ -20,6 +20,7 @@ local FILTER={
 local CFG_DEFAULTS={
     invEsp=true,showList=true,aimOn=true,playerEsp=true,npcEsp=true,bodyEsp=true,mapOn=true,
     listOpacity=0.85,rightOpacity=0.85,lx=10,ly=340,rx=0,ry=44,
+    noRecoil=false,
 }
 local CFG={}; for k,v in pairs(CFG_DEFAULTS) do CFG[k]=v end
 
@@ -80,25 +81,85 @@ local function mkLn(x1,y1,x2,y2,col,tr,zi)
     o.Color=col; o.Transparency=tr; o.Thickness=1; o.ZIndex=zi; o.Visible=false; return o
 end
 
+-- ─── No Recoil ────────────────────────────────────────────────────────────────
+local function findValueOffset(instance, realValue, tolerance)
+    tolerance = tolerance or 0.0001
+    for offset = 0, 0x300, 4 do
+        local ok, asDouble = pcall(memory_read, "double", instance.Address + offset)
+        if ok and math.abs(asDouble - realValue) < tolerance then return offset, "double" end
+        local ok2, asFloat = pcall(memory_read, "float", instance.Address + offset)
+        if ok2 and math.abs(asFloat - realValue) < tolerance then return offset, "float" end
+    end
+    return nil, nil
+end
+
+local function detectOffset(weaponPath)
+    local folders = {"RecoilPattern", "RecoilPattern2"}
+    for _, folderName in ipairs(folders) do
+        local folder = weaponPath:FindFirstChild(folderName)
+        if folder then
+            for _, child in ipairs(folder:GetChildren()) do
+                if child.ClassName == "BoolValue" then
+                    for _, inner in ipairs(child:GetChildren()) do
+                        if inner.ClassName == "NumberValue" and inner.Value ~= 0 then
+                            local offset, kind = findValueOffset(inner, inner.Value)
+                            if offset then return offset, kind end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return nil, nil
+end
+
+local function applyNoRecoil(weaponPath)
+    local detectedOffset, detectedKind = detectOffset(weaponPath)
+    if not detectedOffset then return end
+    local folders = {"RecoilPattern", "RecoilPattern2"}
+    for _, folderName in ipairs(folders) do
+        local folder = weaponPath:FindFirstChild(folderName)
+        if folder then
+            for _, child in ipairs(folder:GetChildren()) do
+                if child.ClassName == "BoolValue" then
+                    for _, inner in ipairs(child:GetChildren()) do
+                        if inner.ClassName == "NumberValue" then
+                            pcall(memory_write, detectedKind, inner.Address + detectedOffset, 0)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function enableNoRecoil()
+    local weapons = ReplicatedStorage:FindFirstChild("RangedWeapons")
+    if not weapons then return end
+    for _, weapon in ipairs(weapons:GetChildren()) do
+        pcall(applyNoRecoil, weapon)
+    end
+end
+
 -- ─── Map ESP ──────────────────────────────────────────────────────────────────
 local MAP_SX=0.133647; local MAP_SY=0.133905
 local MAP_OX=933.08;   local MAP_OY=556.44
 local mapDots={}; local mapLastPos={}; local mapLastChar={}
 
-local function wToMap(wx,wz) return MAP_OX+wx*MAP_SX, MAP_OY+wz*MAP_SY end
+local function worldToMap(wx,wz) return MAP_OX+wx*MAP_SX, MAP_OY+wz*MAP_SY end
 local function mapNewDot(col)
     local o=Drawing.new("Circle"); o.Radius=5; o.Filled=true; o.Color=col
     o.Transparency=1; o.NumSides=12; o.Visible=false; return o
 end
-local function mapNewLbl(col)
+local function mapNewLabel(col)
     local o=Drawing.new("Text"); o.Color=col; o.Size=10; o.Outline=true
     o.Center=true; o.Font=Drawing.Fonts.SystemBold; o.Visible=false; return o
 end
-local function mapGOC(name,col)
-    if not mapDots[name] then mapDots[name]={dot=mapNewDot(col),label=mapNewLbl(col)} end
+local function mapGetOrCreate(name,col)
+    if not mapDots[name] then mapDots[name]={dot=mapNewDot(col),label=mapNewLabel(col)} end
     return mapDots[name]
 end
-local function mapRem(name)
+local function mapRemove(name)
     if mapDots[name] then
         pcall(function() mapDots[name].dot:Remove() end)
         pcall(function() mapDots[name].label:Remove() end)
@@ -106,10 +167,10 @@ local function mapRem(name)
     end
     mapLastPos[name]=nil; mapLastChar[name]=nil
 end
-local function mapHide()
+local function mapHideAll()
     for _,s in pairs(mapDots) do s.dot.Visible=false; s.label.Visible=false end
 end
-local function mapRoot(p)
+local function mapGetRoot(p)
     if not p.Character then return nil end
     local h=p.Character:FindFirstChildOfClass("Humanoid")
     if h and h.Health<=0 then return nil end
@@ -125,12 +186,12 @@ task.spawn(function()
         if not LocalPlayer then continue end
         local open=iskeypressed(77) and CFG.mapOn
         if not open then
-            if wasOpen then mapHide() end
+            if wasOpen then mapHideAll() end
         else
             local current={}
             for _,p in ipairs(Players:GetPlayers()) do current[p.Name]=p end
             for name in pairs(mapDots) do
-                if not current[name] then mapRem(name) end
+                if not current[name] then mapRemove(name) end
             end
             for name,p in pairs(current) do
                 if not LocalPlayer then break end
@@ -143,12 +204,12 @@ task.spawn(function()
                 if isSelf then
                     local char=LocalPlayer.Character
                     root=char and char:FindFirstChild("HumanoidRootPart")
-                else root=mapRoot(p) end
+                else root=mapGetRoot(p) end
                 local wx,wz
                 if root then wx,wz=root.Position.X,root.Position.Z; mapLastPos[name]={x=wx,z=wz}
                 elseif mapLastPos[name] then wx,wz=mapLastPos[name].x,mapLastPos[name].z end
                 if wx then
-                    local px,py=wToMap(wx,wz); local s=mapGOC(name,col)
+                    local px,py=worldToMap(wx,wz); local s=mapGetOrCreate(name,col)
                     s.dot.Color=col; s.label.Color=col
                     s.dot.Position=Vector2.new(px,py); s.dot.Visible=true
                     s.label.Text=isSelf and "[ you ]" or name
@@ -345,13 +406,26 @@ task.spawn(function()
         invSec:Toggle("aimOn","Aim panel",CFG.aimOn,function(state)
             CFG.aimOn=state; if not state and not INV.selected then hideRight() end
         end)
+
         local worldSec=tab:Section("World ESP","Left")
         worldSec:Toggle("playerEsp","Player ESP",CFG.playerEsp,function(state) CFG.playerEsp=state end)
         worldSec:Toggle("npcEsp","NPC ESP",CFG.npcEsp,function(state) CFG.npcEsp=state end)
         worldSec:Toggle("bodyEsp","Dead Body ESP",CFG.bodyEsp,function(state) CFG.bodyEsp=state end)
         worldSec:Toggle("mapOn","Map ESP",CFG.mapOn,function(state)
-            CFG.mapOn=state; if not state then mapHide() end
+            CFG.mapOn=state; if not state then mapHideAll() end
         end)
+
+        local combatSec=tab:Section("Combat","Left")
+        combatSec:Toggle("noRecoil","No Recoil",CFG.noRecoil,function(state)
+            CFG.noRecoil=state
+            if state then
+                pcall(enableNoRecoil)
+                notify("No Recoil enabled","Project Delta",3)
+            else
+                notify("Restart to disable No Recoil","Project Delta",3)
+            end
+        end)
+
         local opSec=tab:Section("Opacity","Right")
         opSec:SliderFloat("listOpacity","List panel",0.0,1.0,CFG.listOpacity,"%.2f",function(val)
             CFG.listOpacity=val; lBg.Transparency=1-val; lDrag.Transparency=1-val
@@ -359,6 +433,7 @@ task.spawn(function()
         opSec:SliderFloat("rightOpacity","Inv / Aim panel",0.0,1.0,CFG.rightOpacity,"%.2f",function(val)
             CFG.rightOpacity=val; rBg.Transparency=1-val; rDrag.Transparency=1-val
         end)
+
         local saveSec=tab:Section("Config","Right")
         saveSec:Text("Export copies your config to the clipboard.")
         saveSec:Text("Paste it into the Import field to restore it.")
@@ -372,25 +447,27 @@ task.spawn(function()
             if importCFG(text) then
                 UI.SetValue("invEsp",CFG.invEsp); UI.SetValue("showList",CFG.showList)
                 UI.SetValue("aimOn",CFG.aimOn); UI.SetValue("playerEsp",CFG.playerEsp)
-                UI.SetValue("npcEsp",CFG.npcEsp)
-                UI.SetValue("bodyEsp",CFG.bodyEsp); UI.SetValue("mapOn",CFG.mapOn)
+                UI.SetValue("npcEsp",CFG.npcEsp); UI.SetValue("bodyEsp",CFG.bodyEsp)
+                UI.SetValue("mapOn",CFG.mapOn); UI.SetValue("noRecoil",CFG.noRecoil)
                 UI.SetValue("listOpacity",CFG.listOpacity); UI.SetValue("rightOpacity",CFG.rightOpacity)
                 lBg.Transparency=1-CFG.listOpacity; lDrag.Transparency=1-CFG.listOpacity
                 rBg.Transparency=1-CFG.rightOpacity; rDrag.Transparency=1-CFG.rightOpacity
                 INV.lx=CFG.lx; INV.ly=CFG.ly; INV.rx=CFG.rx; INV.ry=CFG.ry
                 applyListPos(INV.lx,INV.ly)
                 if CFG.invEsp then buildList() else hideList(); hideRight(); INV.selected=nil end
+                if CFG.noRecoil then pcall(enableNoRecoil) end
                 UI.SetValue("cfgImport",""); notify("Config loaded!","Project Delta",3)
             else notify("Invalid string.","Project Delta",3) end
         end)
         saveSec:Spacing()
+
         local miscSec=tab:Section("Misc","Right")
         miscSec:Button("Reset to default values",function()
             for k,v in pairs(CFG_DEFAULTS) do CFG[k]=v end
             UI.SetValue("invEsp",CFG.invEsp); UI.SetValue("showList",CFG.showList)
             UI.SetValue("aimOn",CFG.aimOn); UI.SetValue("playerEsp",CFG.playerEsp)
-            UI.SetValue("npcEsp",CFG.npcEsp)
-            UI.SetValue("bodyEsp",CFG.bodyEsp); UI.SetValue("mapOn",CFG.mapOn)
+            UI.SetValue("npcEsp",CFG.npcEsp); UI.SetValue("bodyEsp",CFG.bodyEsp)
+            UI.SetValue("mapOn",CFG.mapOn); UI.SetValue("noRecoil",CFG.noRecoil)
             UI.SetValue("listOpacity",CFG.listOpacity); UI.SetValue("rightOpacity",CFG.rightOpacity)
             INV.lx=CFG.lx; INV.ly=CFG.ly; INV.rx=CFG.rx; INV.ry=CFG.ry
             lBg.Transparency=1-CFG.listOpacity; lDrag.Transparency=1-CFG.listOpacity
@@ -406,8 +483,8 @@ task.spawn(function()
     pcall(function()
         UI.SetValue("invEsp",CFG.invEsp); UI.SetValue("showList",CFG.showList)
         UI.SetValue("aimOn",CFG.aimOn); UI.SetValue("playerEsp",CFG.playerEsp)
-        UI.SetValue("npcEsp",CFG.npcEsp)
-        UI.SetValue("bodyEsp",CFG.bodyEsp); UI.SetValue("mapOn",CFG.mapOn)
+        UI.SetValue("npcEsp",CFG.npcEsp); UI.SetValue("bodyEsp",CFG.bodyEsp)
+        UI.SetValue("mapOn",CFG.mapOn); UI.SetValue("noRecoil",CFG.noRecoil)
         UI.SetValue("listOpacity",CFG.listOpacity); UI.SetValue("rightOpacity",CFG.rightOpacity)
     end)
     if CFG.invEsp then buildList() end
@@ -514,7 +591,6 @@ task.spawn(function()
         while true do
             task.wait(0.5)
             local active={}
-
             local aiZones=workspace:FindFirstChild("AiZones")
             if aiZones then
                 for _,zone in ipairs(aiZones:GetChildren()) do
@@ -527,7 +603,6 @@ task.spawn(function()
                     end
                 end
             end
-
             local playerNames={}
             for _,p in ipairs(Players:GetPlayers()) do playerNames[p.Name]=true end
             local dropped=workspace:FindFirstChild("DroppedItems")
@@ -544,7 +619,6 @@ task.spawn(function()
                     end
                 end
             end
-
             for model in pairs(espSlots) do
                 if not active[model] then espRemove(model) end
             end
