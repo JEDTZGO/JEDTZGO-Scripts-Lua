@@ -20,7 +20,7 @@ local FILTRO={
 local CFG_DEFECTO={
     invEsp=true,mostrarLista=true,miraOn=true,jugadorEsp=true,npcEsp=true,cuerpoEsp=true,mapaOn=true,
     opacidadLista=0.85,opacidadDerecha=0.85,lx=10,ly=340,rx=0,ry=44,
-    noRetroceso=false,
+    noRetroceso=true,
 }
 local CFG={}; for k,v in pairs(CFG_DEFECTO) do CFG[k]=v end
 
@@ -145,6 +145,8 @@ end
 local MAP_SX=0.133647; local MAP_SY=0.133905
 local MAP_OX=933.08;   local MAP_OY=556.44
 local mapaPuntos={}; local mapaUltPos={}; local mapaUltChar={}
+local MAP_C_EXIT=Color3.fromRGB(0,255,128)
+local mapaExits={}
 
 local function mundoAMapa(wx,wz) return MAP_OX+wx*MAP_SX, MAP_OY+wz*MAP_SY end
 local function mapaNuevoPunto(col)
@@ -169,6 +171,38 @@ local function mapaEliminar(nombre)
 end
 local function mapaOcultar()
     for _,s in pairs(mapaPuntos) do s.punto.Visible=false; s.etiqueta.Visible=false end
+    for _,s in pairs(mapaExits) do s.punto.Visible=false; s.etiqueta.Visible=false end
+end
+
+local function mapaCargarExits()
+    -- Limpiar exits anteriores
+    for _,s in pairs(mapaExits) do
+        pcall(function() s.punto:Remove() end)
+        pcall(function() s.etiqueta:Remove() end)
+    end
+    mapaExits={}
+    local nc=workspace:FindFirstChild("NoCollision")
+    if not nc then return end
+    local folder=nc:FindFirstChild("ExitLocations")
+    if not folder then return end
+    for _,part in ipairs(folder:GetChildren()) do
+        if part:IsA("BasePart") then
+            local punto=Drawing.new("Circle")
+            punto.Radius=6; punto.Filled=true; punto.Color=MAP_C_EXIT
+            punto.Transparency=1; punto.NumSides=12; punto.Visible=false
+
+            local etiqueta=Drawing.new("Text")
+            etiqueta.Color=MAP_C_EXIT; etiqueta.Size=10; etiqueta.Outline=true
+            etiqueta.Center=true; etiqueta.Font=Drawing.Fonts.SystemBold; etiqueta.Visible=false
+
+            local px,py=MAP_OX+part.Position.X*MAP_SX, MAP_OY+part.Position.Z*MAP_SY
+            punto.Position=Vector2.new(px,py)
+            etiqueta.Text="[EXIT]"
+            etiqueta.Position=Vector2.new(px,py-12)
+
+            table.insert(mapaExits,{punto=punto,etiqueta=etiqueta})
+        end
+    end
 end
 local function mapaRaiz(p)
     if not p.Character then return nil end
@@ -188,6 +222,11 @@ task.spawn(function()
         if not abierto then
             if estabaAbierto then mapaOcultar() end
         else
+            -- Recargar exits cada vez que se abre el mapa
+            if not estabaAbierto then pcall(mapaCargarExits) end
+            for _,s in pairs(mapaExits) do
+                s.punto.Visible=true; s.etiqueta.Visible=true
+            end
             local actual={}
             for _,p in ipairs(Players:GetPlayers()) do actual[p.Name]=p end
             for nombre in pairs(mapaPuntos) do
@@ -228,6 +267,8 @@ notify("Project Delta cargando en 10s...","PD v5.3",4)
 task.spawn(function()
     task.wait(10)
     if not esperarUI(20) then notify("Matcha no encontrado","PD v5.3",5); return end
+    pcall(mapaCargarExits)
+    pcall(activarNoRetroceso)
 
     local Camara=workspace.CurrentCamera
     local DH=14; local MARG=8; local ZONA_RESIZE=12
@@ -425,7 +466,7 @@ task.spawn(function()
                 notify("Reinicia para desactivar el no retroceso","Project Delta",3)
             end
         end)
-
+      
         local secOpac=tab:Section("Opacidad","Right")
         secOpac:SliderFloat("opacidadLista","Panel lista",0.0,1.0,CFG.opacidadLista,"%.2f",function(val)
             CFG.opacidadLista=val; lFondo.Transparency=1-val; lArrastrar.Transparency=1-val
@@ -674,6 +715,7 @@ task.spawn(function()
             end
         end
     end)
+
 
     notify("Project Delta listo  -  abre Matcha para configurar","PD v5.3",4)
 end)
