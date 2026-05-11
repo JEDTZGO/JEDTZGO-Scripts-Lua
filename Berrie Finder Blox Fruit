@@ -1,0 +1,119 @@
+local BERRIES = {
+    { name = "Green Toad Berry",   sphere = "Sphere.011" },
+    { name = "Yellow Star Berry",  sphere = "Sphere.022" },
+    { name = "Orange Berry",       sphere = "Sphere.007" },
+    { name = "Red Cherry Berry",   sphere = "Sphere.005" },
+    { name = "Purple Jelly Berry", sphere = "Sphere.004" },
+    { name = "Pink Pig Berry",     sphere = "Sphere.008" },
+    { name = "Blue Icicle Berry",  sphere = "Sphere.018" },
+    { name = "White Cloud Berry",  sphere = "Sphere.035" },
+}
+
+local berryNames = {}
+local sphereSet  = {}
+for _, b in ipairs(BERRIES) do
+    table.insert(berryNames, b.name)
+    sphereSet[b.sphere] = b.name
+end
+
+local function getEntry(idx) return BERRIES[idx + 1] end
+
+local function scanWorkspace()
+    local results = {}
+    for s in pairs(sphereSet) do results[s] = {} end
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if results[obj.Name] then
+            table.insert(results[obj.Name], obj)
+        end
+    end
+    return results
+end
+
+local function getPos(obj)
+    if obj:IsA("BasePart") then return obj.Position end
+    if obj:IsA("Model") then
+        if obj.PrimaryPart then return obj.PrimaryPart.Position end
+        for _, c in ipairs(obj:GetDescendants()) do
+            if c:IsA("BasePart") then return c.Position end
+        end
+    end
+    return nil
+end
+
+local function getNearestOf(objects)
+    local char = game.Players.LocalPlayer.Character
+    if not char then return nil end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return nil end
+    local rootPos = root.Position
+    local nearest, nearestDist = nil, math.huge
+    for _, obj in ipairs(objects) do
+        local pos = getPos(obj)
+        if pos then
+            local dist = (rootPos - pos).Magnitude
+            if dist < nearestDist then
+                nearestDist = dist
+                nearest = obj
+            end
+        end
+    end
+    return nearest, nearestDist
+end
+
+local function teleportTo(pos, label)
+    local char = game.Players.LocalPlayer.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    local dest = Vector3.new(pos.X, pos.Y + 5, pos.Z)
+    for i = 1, 3 do
+        root.Position = dest
+        task.wait(0.1)
+    end
+    print("[BerryFinder] TP -> " .. label)
+end
+
+UI.AddTab("Berry Finder", function(tab)
+
+    local ctrl = tab:Section("Controls", "Left")
+    ctrl:Combo("berry_sel", "Berry", berryNames, 0)
+    ctrl:Spacing()
+
+    local act = tab:Section("Actions", "Left")
+
+    act:Button("Teleport to nearest", function()
+        local entry = getEntry(UI.GetValue("berry_sel"))
+        if not entry then return end
+        local objs = scanWorkspace()[entry.sphere]
+        if #objs == 0 then
+            print("[BerryFinder] " .. entry.name .. " not found")
+            return
+        end
+        local nearest, dist = getNearestOf(objs)
+        if not nearest then return end
+        local pos = getPos(nearest)
+        if not pos then return end
+        teleportTo(pos, entry.name .. " (" .. math.floor(dist) .. " studs)")
+    end)
+
+    act:Button("Find all in world", function()
+        local results = scanWorkspace()
+        local total = 0
+        print("=== Berries in world ===")
+        for _, b in ipairs(BERRIES) do
+            local n = #results[b.sphere]
+            print(b.name .. ": " .. n)
+            total += n
+        end
+        print("Total: " .. total)
+        print("========================")
+    end)
+
+    local info = tab:Section("Berries", "Right")
+    info:Text("Types: " .. #BERRIES)
+    info:Spacing()
+    for _, b in ipairs(BERRIES) do
+        info:Text("- " .. b.name)
+    end
+
+end)
